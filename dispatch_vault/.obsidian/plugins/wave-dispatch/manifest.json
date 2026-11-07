@@ -1,0 +1,9 @@
+{
+  "id": "wave-dispatch",
+  "name": "Wave Dispatch",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Ask the Wave Dispatch team of small local models from inside Obsidian, watch each step, and compare the team with one model.",
+  "author": "Wave Dispatch",
+  "isDesktopOnly": true
+}

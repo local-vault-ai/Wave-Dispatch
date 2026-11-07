@@ -1,0 +1,29 @@
+.wave-dispatch { padding: 8px 12px; }
+.wave-dispatch h3 { margin: 4px 0; }
+.wave-dispatch h4 { margin: 16px 0 4px; }
+.wave-dispatch-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 8px; }
+.wave-dispatch-status { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: var(--font-ui-small); margin-bottom: 8px; }
+.wave-dispatch-ok { color: var(--color-green); }
+.wave-dispatch-warn { color: var(--color-orange); }
+.wave-dispatch-input { width: 100%; resize: vertical; font-family: var(--font-interface); }
+.wave-dispatch-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.wave-dispatch-controls select { max-width: 220px; }
+.wave-dispatch-compare-label { display: flex; align-items: center; gap: 4px; font-size: var(--font-ui-small); }
+.wave-dispatch-switches { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0 0; }
+.wave-dispatch-switch { display: flex; align-items: center; gap: 4px; font-size: var(--font-ui-small); cursor: pointer; }
+.wave-dispatch-switches select { max-width: 160px; }
+.wave-dispatch-progress { font-size: var(--font-ui-small); margin: 8px 0; }
+.wave-dispatch-row { padding: 2px 0; color: var(--text-muted); }
+.wave-dispatch-row.is-running { color: var(--text-accent); }
+.wave-dispatch-row.is-done { color: var(--text-normal); }
+.wave-dispatch-results { display: grid; gap: 8px; grid-template-columns: 1fr; }
+.wave-dispatch-results.is-compare { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.wave-dispatch-card { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 8px; background: var(--background-secondary); min-width: 0; }
+.wave-dispatch-card-title { font-weight: 600; }
+.wave-dispatch-card-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.wave-dispatch-answer { white-space: pre-wrap; word-break: break-word; font-size: var(--font-ui-small); margin: 6px 0; max-height: 360px; overflow: auto; }
+.wave-dispatch-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.wave-dispatch-error .wave-dispatch-card-title { color: var(--color-red); }
+.wave-dispatch-recent-row { cursor: pointer; padding: 2px 0; font-size: var(--font-ui-small); }
+.wave-dispatch-recent-row:hover { color: var(--text-accent); }
+.wave-dispatch-route { white-space: pre-wrap; word-break: break-word; color: var(--text-muted); font-size: var(--font-ui-smaller); margin: 4px 0; }

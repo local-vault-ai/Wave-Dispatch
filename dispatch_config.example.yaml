@@ -1,0 +1,16 @@
+# Wave Dispatch configuration. Copy to dispatch_config.yaml to change it (that file is used instead of this one; it is
+# git-ignored). Out of the box Wave Dispatch uses ONE computer: the local Ollama at http://127.0.0.1:11434.
+
+vault: dispatch_vault           # the Obsidian vault with Bots/, Machines/, Models/, Runs/, Logs/
+
+dispatch:
+  timeout_s: 120                # per model call (one deadline, retries included)
+  max_tokens: 2000              # per bot answer (the Math Bot's worked answers need room)
+  graph_depth: 1                # wikilink hops from the notes the question names
+
+# Machines live in dispatch_vault/Machines/<Name>.md, and THE NOTE WINS. The values below are only DEFAULTS for keys a
+# note leaves out, or for a machine that has no note yet. ${VAR:-default} reads .env (or the process environment).
+machines:
+  This Computer:
+    provider: ollama            # ollama (native API) | openai (any /v1/chat/completions server)
+    endpoint: ${WAVE_DISPATCH_ENDPOINT:-http://127.0.0.1:11434}

@@ -1,0 +1,10 @@
+FROM ./wave-code-gate-q8_0.gguf
+TEMPLATE """{{- range .Messages }}<|im_start|>{{ .Role }}
+{{ .Content }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""
+PARAMETER temperature 0
+PARAMETER num_ctx 2048
+PARAMETER num_predict 2
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"

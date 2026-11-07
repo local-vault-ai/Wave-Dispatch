@@ -1,0 +1,19 @@
+filters:
+  and:
+    - file.hasTag("wave-dispatch/bot")
+views:
+  - type: table
+    name: Wave Dispatch Team
+    order:
+      - file.name
+      - duty
+      - for
+      - output
+      - model
+      - temperature
+      - seed
+      - machine
+      - status
+    sort:
+      - property: duty
+        direction: ASC

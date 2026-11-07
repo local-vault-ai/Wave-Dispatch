@@ -1,0 +1,11 @@
+FROM ./wave-split-q8_0.gguf
+TEMPLATE """{{- range .Messages }}<|im_start|>{{ .Role }}
+{{ .Content }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""
+PARAMETER temperature 0
+PARAMETER num_ctx 4096
+PARAMETER num_predict 400
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"
+PARAMETER repeat_penalty 1.0

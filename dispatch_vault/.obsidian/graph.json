@@ -1,0 +1,58 @@
+{
+  "showTags": false,
+  "showAttachments": false,
+  "showOrphans": true,
+  "colorGroups": [
+    {
+      "query": "tag:#wave-dispatch/hub",
+      "color": {
+        "a": 1,
+        "rgb": 16766720
+      }
+    },
+    {
+      "query": "tag:#wave-dispatch/bot",
+      "color": {
+        "a": 1,
+        "rgb": 4886754
+      }
+    },
+    {
+      "query": "tag:#wave-dispatch/machine",
+      "color": {
+        "a": 1,
+        "rgb": 5025616
+      }
+    },
+    {
+      "query": "tag:#wave-dispatch/model",
+      "color": {
+        "a": 1,
+        "rgb": 10181046
+      }
+    },
+    {
+      "query": "tag:#wave-dispatch/run",
+      "color": {
+        "a": 1,
+        "rgb": 15105570
+      }
+    },
+    {
+      "query": "tag:#wave-dispatch/receipt",
+      "color": {
+        "a": 1,
+        "rgb": 1752220
+      }
+    },
+    {
+      "query": "tag:#wave-dispatch/knowledge",
+      "color": {
+        "a": 1,
+        "rgb": 9807270
+      }
+    }
+  ],
+  "lineSizeMultiplier": 1.2,
+  "nodeSizeMultiplier": 1.1
+}

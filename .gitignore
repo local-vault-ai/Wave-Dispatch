@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Secrets: never in the repo
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*token*
+*secret*
+credentials.json
+
+# The tiny models' weights: publish them as release assets, never in git history
+models/*/*.gguf
+
+# Wave Dispatch: local state, logs, user config, generated run notes / receipts / comparisons, panel settings
+.wave_dispatch/
+/logs/
+/workspace_sandbox/
+dispatch_config.yaml
+dispatch_vault/Runs/Run *
+dispatch_vault/Runs/Compare *
+dispatch_vault/Logs/Receipt *
+dispatch_vault/.obsidian/workspace*.json
+dispatch_vault/.obsidian/plugins/*/data.json
