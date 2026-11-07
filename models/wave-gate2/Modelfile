@@ -1,4 +1,4 @@
-FROM ./wave-code-gate-q8_0.gguf
+FROM ./wave-gate2-q8_0.gguf
 TEMPLATE """{{- range .Messages }}<|im_start|>{{ .Role }}
 {{ .Content }}<|im_end|>
 {{ end }}<|im_start|>assistant

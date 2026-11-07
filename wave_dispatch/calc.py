@@ -139,8 +139,75 @@ def describe(rows: list[dict]) -> str:
 
 # ---------------------------------------------------------------- checking what a bot wrote (like clang for C++)
 
-CLAIM = re.compile(r"(?<![\w.])((?:\(?\s*-?\d[\d,]*(?:\.\d+)?\s*\)?\s*(?:[-+*/×÷x^]|\*\*)\s*)+\(?\s*-?\d[\d,]*(?:\.\d+)?\s*\)?)"
-                   r"\s*=\s*(-?\d(?:[\d,]*\d)?(?:\.\d+)?)(?![\d.]*[\w])")
+# Sums are found by a one-pass TOKEN SCANNER, not one big regex: nested optional spaces in a regex backtracked
+# exponentially on hostile replies ("1 + " * 12 + "1 !" ran for seconds: Astra security reviews 2026-11-06).
+_TOK = re.compile(r"\d(?:[\d,]*\d)?(?:\.\d+)?|\*\*|[-+*/×÷^()=x]|[^\S\n]+|.")   # a number never ends in ","
+_OPS = {"-", "+", "*", "/", "×", "÷", "^", "**", "x"}
+LINE_MAX = 1000                                             # longer lines are not checked for sums
+
+
+def _claims(line: str) -> list[tuple[str, str]]:
+    """[(left side, claimed number)] for every "<numbers and operators> = <number>" in one line. Linear time."""
+    toks = [(m.group(0), m.start(), m.end()) for m in _TOK.finditer(line)]
+    kind = []
+    for i, (t, a, b) in enumerate(toks):
+        if t[0].isdigit():
+            kind.append("num")
+        elif t.isspace():
+            kind.append("sp")
+        elif t == "x":                                       # "3 x 4", "3x(4+1)" are sums; the x in "max" is not
+            prev = next((kind[j] for j in range(i - 1, -1, -1) if kind[j] != "sp"), "")
+            nxt = next((u for u, _, _ in toks[i + 1:] if not u.isspace()), "")
+            glued = line[a - 1:a].isalpha() or line[b:b + 1].isalpha()
+            kind.append("op" if prev in ("num", ")") and (nxt[:1].isdigit() or nxt == "(") and not glued else "other")
+        elif t in _OPS:
+            kind.append("op")
+        elif t in ("(", ")", "="):
+            kind.append(t)
+        else:
+            kind.append("other")
+    out = []
+    for i, k in enumerate(kind):
+        if k != "=":
+            continue
+        j = i + 1                                            # the right side: a number, or an expression ("(2 * 6)")
+        while j < len(toks) and kind[j] == "sp":
+            j += 1
+        rstart = j
+        sign = toks[j][0] if j < len(toks) and toks[j][0] in ("-", "+") else ""
+        j += bool(sign)
+        if j >= len(toks) or kind[j] not in ("num", "("):
+            continue
+        k2 = j
+        while k2 < len(toks) and kind[k2] in ("num", "op", "(", ")", "sp"):
+            k2 += 1
+        rhs_end = k2
+        while rhs_end > j and kind[rhs_end - 1] == "sp":
+            rhs_end -= 1
+        after = re.sub(r"^[\d.]*", "", line[toks[rhs_end - 1][2]:toks[rhs_end - 1][2] + 40])
+        if after[:1].isalnum() or after[:1] == "_":      # "= 4kg", "= 2x": not a plain number
+            continue
+        chained = rhs_end - j > 1                            # "= 2 * 6 = 12": every step is checked (review 4/5)
+        if not chained and not re.fullmatch(r"\d(?:[\d,]*\d)?(?:\.\d+)?", toks[j][0]):
+            continue
+        start = i                                            # the left side: numbers, operators, brackets, spaces
+        while start > 0 and kind[start - 1] in ("num", "op", "(", ")", "sp"):
+            start -= 1
+        while start < i and not (kind[start] in ("num", "(") or (toks[start][0] == "-" and start + 1 < i
+                                                                 and kind[start + 1] == "num")):
+            start += 1
+        while start < i and line[toks[start][1] - 1:toks[start][1]] and \
+                (line[toks[start][1] - 1].isalnum() or line[toks[start][1] - 1] in "._"):   # glued to a word
+            start += 1
+            while start < i and not (kind[start] in ("num", "(") or toks[start][0] == "-"):
+                start += 1
+        seg = [k3 for k3 in kind[start:i] if k3 != "sp"]
+        if seg.count("num") >= 2 and "op" in seg:            # "2,450 = 0.17 x 2450" restates, it is no sum
+            rhs = line[toks[rstart][1]:toks[rhs_end - 1][2]].strip() if chained else ("-" if sign == "-" else "") + toks[j][0]
+            out.append((line[toks[start][1]:toks[i][1]].strip(), rhs))
+    return out
+
+
 PCT_CLAIM = re.compile(r"(?<![\w.])(\d[\d,]*(?:\.\d+)?)\s*(?:%|percent)\s+of\s+(\d[\d,]*(?:\.\d+)?)\s*"
                        r"(?:is|=|equals|comes to|would be|will be)\s+(?:about\s+|approximately\s+)?(-?\d(?:[\d,]*\d)?(?:\.\d+)?)(?![\d.]*[\w])"
                        r"(?!\s*(?:[-+*/×÷^]|x\s*\d))", re.I)   # "= 0.17 x 2450 = 416.5": 0.17 is a step, not the answer
@@ -158,7 +225,9 @@ _TEXT = re.compile(r"\\(?:text|mathrm|mathbf|operatorname)\s*\{([^{}]*)\}")
 def plain_math(text: str) -> str:
     """LaTeX maths as plain sums, so check_sums can read them (50-question benchmark 2026-11-06: "\\( 14 + 22 + 37 + 41
     + 56 = 160 \\)" and "\\[ 09 \\times 60 + 47 = 597 \\]" were never checked)."""
-    t = text or ""
+    t = re.sub(r"(?<=[=:\-\u2212]\s)\*\*(?=[\d.(-])|(?<=[=:\-\u2212])\*\*(?=[\d.(-])|(?<=[\d.%)])\*\*(?=[\s.,;:!?)]|$)",
+               "", text or "", flags=re.M)                 # bold around a number ("= **99**"); "2 ** 3" stays a power
+    t = re.sub(r"[\u2212\u2012\u2013\u2014\ufe63\uff0d](?=\s*[\d.(])", "-", t)   # Unicode minus = "-"
     for _ in range(3):                                     # nested \frac{\frac{a}{b}}{c}
         t = _FRAC.sub(r"(\1)/(\2)", t)
     t = _TEXT.sub(r" \1 ", t)
@@ -166,7 +235,7 @@ def plain_math(text: str) -> str:
     t = re.sub(r"\\div\b", "/", t)
     t = re.sub(r"\\(?:approx|simeq|eq)\b", "=", t)
     t = re.sub(r"\\left|\\right|\\[()\[\]]|\\[,;! ]|\$", " ", t)
-    t = re.sub(r"(?<![\d.])0+(?=\d)", "", t)                  # "09 * 60" -> "9 * 60" (Python can't read 09)
+    t = re.sub(r"(?<![\d.,])0+(?=\d)", "", t)                 # "09 * 60" -> "9 * 60"; "1,000" stays (review 3)
     return t.replace("{", "(").replace("}", ")")
 
 
@@ -192,18 +261,28 @@ def check_sums(text: str) -> tuple[list[dict], list[dict]]:
     a ```calc block, recomputed exactly. Returns (wrong, right) rows {expr, claimed, actual}. A sum the calculator
     can't read is skipped (never a false alarm); a value rounded to the digits written counts as right."""
     wrong, right = [], []
-    flat = BLOCK.sub(" ", text or "")
+    flat = BLOCK.sub(" ", (text or "")[:200_000])
     flat = plain_math(flat)                                 # LaTeX read as plain sums (plain text is unchanged)
-    pairs = CLAIM.findall(flat)[:40] + [(f"{p}/100 * {w}", c) for p, w, c in PCT_CLAIM.findall(flat)[:20]] \
-        + _calc_results(text or "")[:12]
+    lines = [re.sub(r"[^\S\n]+", " ", ln) for ln in flat.splitlines() if len(ln) <= LINE_MAX]   # bounded work
+    pairs = [c for ln in lines for c in _claims(ln)][:40] \
+        + [(f"{p}/100 * {w}", c) for ln in lines if len(ln) <= 300 and ("%" in ln or "percent" in ln.lower())
+           for p, w, c in PCT_CLAIM.findall(ln)][:20] \
+        + _calc_results((text or "")[:200_000])[:12]
     for lhs, rhs in pairs:   # "17% of 2,450 is 416.25" (live 2026-11-05) is checked as 17/100 * 2,450
         expr = re.sub(r"(?<=[\d)])\s*[x×]\s*(?=[\d(])", "*", lhs).replace("^", "**")
         try:
             actual = evaluate(expr)
         except CalcError:
             continue
-        claimed = _num(rhs)
-        decimals = len(rhs.split(".")[1]) if "." in rhs else 0
+        try:
+            claimed = _num(rhs)
+            decimals = len(rhs.split(".")[1]) if "." in rhs else 0
+        except ValueError:                                  # a chained step: "= 2 * 6 = 12" -> the right side
+            try:                                            # is an expression of its own
+                claimed = evaluate(re.sub(r"(?<=[\d)])\s*[x×]\s*(?=[\d(])", "*", rhs).replace("^", "**"))
+            except CalcError:
+                continue
+            decimals = 9
         ok = abs(actual - claimed) <= max(0.5 * 10 ** -decimals, 1e-9 * max(1.0, abs(actual)))
         row = {"expr": lhs.strip(), "claimed": rhs, "actual": fmt(actual)}
         if row not in right and row not in wrong:          # the LaTeX copy repeats plain sums

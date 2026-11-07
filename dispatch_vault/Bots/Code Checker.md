@@ -7,7 +7,7 @@ seed: 7
 machine: "[[This Computer]]"
 status: active
 for: "[[Code Bot]]"
-reviewer: "[[Try Again Bot]]"
+reviewer: "[[Try Again Coding Bot]]"
 max_rounds: 3
 tags: [wave-dispatch/bot]
 ---

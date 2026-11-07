@@ -4,6 +4,11 @@
     "bytes": 531068000,
     "sha256": "e628f96e469a16b5651fa3fe42b9983964e3d6ca54ba4eba4482f47ad813231b"
   },
+  "wave-gate2": {
+    "file": "wave-gate2-q8_0.gguf",
+    "bytes": 531068000,
+    "sha256": "5ae8bbf35438fe73be5ac464d3df122db50c16bbe974ad41b0c75ac59b8b3baf"
+  },
   "wave-split": {
     "file": "wave-split-q8_0.gguf",
     "bytes": 531068000,
@@ -13,10 +18,5 @@
     "file": "wave-review-q8_0.gguf",
     "bytes": 531068000,
     "sha256": "12d303cb36cc83b914c84e29bb63add9dfbe49d222c9b2ddbbae71a914c3ebcd"
-  },
-  "wave-code-gate": {
-    "file": "wave-code-gate-q8_0.gguf",
-    "bytes": 531068000,
-    "sha256": "17b38a92d13c108c57b5ddc500d3170ae521144305699fc42fbad6ab39722c18"
   }
 }

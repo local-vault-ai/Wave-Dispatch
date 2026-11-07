@@ -6,18 +6,16 @@ temperature: 0
 seed: 7
 machine: "[[This Computer]]"
 status: active
-for: "[[Writer]]"
-gate_question: "Does () ask to explain, define or describe something, or is it a greeting or small talk?"
+for: "[[Graph Reader]]"
+gate_question: "Does () contain a link to a note written in [[double brackets]]?"
 gate_examples:
-  - "Hi there, how are you? -> yes"
-  - "Good morning! -> yes"
-  - "What does RAM mean? -> yes"
-  - "Explain what a GPU does. -> yes"
-  - "What is 3 * 7? -> no"
-  - "Write a JavaScript function that sorts a list. -> no"
+  - "What does the [[Rules]] note say about saving? -> yes"
+  - "Summarise [[Project Plan]]. -> yes"
+  - "What is 15% of 80? -> no"
+  - "Hi, how are you? -> no"
 tags: [wave-dispatch/bot]
 ---
-# Writer Gate
+# Gate Bot Graph
 
 Part of [[AI Bots]] · runs on [[This Computer]] · step in [[How Wave Dispatch Works]]
 

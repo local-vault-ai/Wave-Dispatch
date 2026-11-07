@@ -72,18 +72,18 @@ def gate_on(test):
 
 
 GATES = lambda code=lambda p: "function" in p, math=lambda p: "How many" in p, writer=lambda p: False, notes=lambda p: "[[" in p: {
-    "Code Gate": [gate_on(code)], "Math Gate": [gate_on(math)], "Writer Gate": [gate_on(writer)],
-    "Notes Gate": [gate_on(notes)]}
+    "Gate Bot Code": [gate_on(code)], "Gate Bot Math": [gate_on(math)], "Gate Bot Writer": [gate_on(writer)],
+    "Gate Bot Graph": [gate_on(notes)]}
 MSG = "Write a Python function is_prime(n), and tell me how many prime numbers there are below 100."
 SPLIT = "1. Write a Python function is_prime(n).\n2. How many prime numbers are there below 100?"
 CODE = "```python\ndef is_prime(n):\n    return n > 1 and all(n % d for d in range(2, int(n ** 0.5) + 1))\n```"
 
 
-@check("D1 the starter vault loads and validates: 12 bots, 4 gates with questions, review gate -> Try Again Bot")
+@check("D1 the starter vault loads and validates: 12 bots, 4 gates with questions, review gate -> Try Again Coding Bot")
 def _():
     t = team_for(vault_copy())
     t.validate()
-    assert len(t.bots) == 12 and len(t.duty("gate")) == 4 and t.duty("review")[0].reviewer == "Try Again Bot"
+    assert len(t.bots) == 12 and len(t.duty("gate")) == 4 and t.duty("review")[0].reviewer == "Try Again Coding Bot"
     assert {g.target for g in t.duty("gate")} == {"Math Bot", "Code Bot", "Writer", "Graph Reader"}
     assert all("()" in g.gate_question and g.gate_examples for g in t.duty("gate"))
 
@@ -96,13 +96,13 @@ def _():
     r = de.run_dispatch(MSG, team=t, chat_fn=f)
     assert r.parts == ["Write a Python function is_prime(n).", "How many prime numbers are there below 100?"], r.parts
     assert r.routes == {"1": ["Code Bot"], "2": ["Math Bot"]}, r.routes
-    assert [n for n, _ in f.calls].count("Code Gate") == 2 and [n for n, _ in f.calls].count("Writer") == 0
+    assert [n for n, _ in f.calls].count("Gate Bot Code") == 2 and [n for n, _ in f.calls].count("Writer") == 0
     assert [m for n, m in f.calls if n == "Splitter"][0] == dc.split_prompt(MSG)          # the trained prompt
     mq = [m for n, m in f.calls if n == "Math Bot"][0][-1]["content"]
     assert "How many prime numbers" in mq and "Write a Python" not in mq, mq                # only its part
-    g = [m for n, m in f.calls if n == "Code Gate"][0]
-    assert g == dc.gate_prompt("Code Gate", "Wave Dispatch", t.by_name("Code Gate").instructions,
-                               t.by_name("Code Gate").gate_question, t.by_name("Code Gate").gate_examples,
+    g = [m for n, m in f.calls if n == "Gate Bot Code"][0]
+    assert g == dc.gate_prompt("Gate Bot Code", "Wave Dispatch", t.by_name("Gate Bot Code").instructions,
+                               t.by_name("Gate Bot Code").gate_question, t.by_name("Gate Bot Code").gate_examples,
                                "Write a Python function is_prime(n).")[1]
     comp = [m for n, m in f.calls if n == "Compiler"][0][-1]["content"]
     assert "[CODE 1]" in comp and "def is_prime" not in comp and "(1) Write a Python function" in comp, comp
@@ -116,7 +116,7 @@ def _():
     f = Fake({"Splitter": ["1. Write a Python function is_prime(n).\n2. How many primes?"], **GATES(),
               "Code Checker": ["no"], "Code Bot": [CODE], "Compiler": ["[CODE 1]"]})
     r = de.run_dispatch(MSG, team=t, chat_fn=f)
-    assert r.split_refused == "lost 100" and r.parts == [] and [n for n, _ in f.calls].count("Code Gate") == 1
+    assert r.split_refused == "lost 100" and r.parts == [] and [n for n, _ in f.calls].count("Gate Bot Code") == 1
 
 
 @check("D4 a part no gate takes goes to the Writer; a lone answer is the final answer (no Compiler call)")
@@ -143,22 +143,22 @@ def _():
     assert "is 170, not 160" in fix and r2.answer.endswith("= 170") and r2.status == "VERIFIED", (fix, r2.answer)
 
 
-@check("D6 review loop: yes -> Try Again Bot -> Code Bot rewrites -> checked again; stops at max_rounds; OK stops it")
+@check("D6 review loop: yes -> Try Again Coding Bot -> Code Bot rewrites -> checked again; stops at max_rounds; OK stops it")
 def _():
     t = team_for(vault_copy())
     bad, good = "```python\ndef is_even(n):\n    return n % 2 == 1\n```", "```python\ndef is_even(n):\n    return n % 2 == 0\n```"
     q = "Write a Python function is_even(n)."
     f = Fake({"Splitter": ["1. " + q], **GATES(code=lambda p: "function" in p), "Code Checker": ["yes", "no"],
-              "Try Again Bot": ["It returns True for odd numbers: use == 0."], "Code Bot": [bad, good]})
+              "Try Again Coding Bot": ["It returns True for odd numbers: use == 0."], "Code Bot": [bad, good]})
     r = de.run_dispatch(q, team=t, chat_fn=f)
     assert [(x["round"], x["result"]) for x in r.reviews] == [(1, "fixed"), (2, "good")] and r.answer == good, r.reviews
     assert [m for n, m in f.calls if n == "Code Checker"][0] == dc.review_gate_prompt("Code Checker", "Wave Dispatch", q, bad)
     f2 = Fake({"Splitter": ["1. " + q], **GATES(code=lambda p: "function" in p), "Code Checker": ["yes"],
-               "Try Again Bot": ["Use == 0."], "Code Bot": [bad]})
+               "Try Again Coding Bot": ["Use == 0."], "Code Bot": [bad]})
     r2 = de.run_dispatch(q, team=t, chat_fn=f2)
     assert len(r2.reviews) == 3 and r2.status == "UNVERIFIED" and not r2.checks["review_passed"], r2.reviews
     f3 = Fake({"Splitter": ["1. " + q], **GATES(code=lambda p: "function" in p), "Code Checker": ["yes"],
-               "Try Again Bot": ["OK"], "Code Bot": [good]})
+               "Try Again Coding Bot": ["OK"], "Code Bot": [good]})
     r3 = de.run_dispatch(q, team=t, chat_fn=f3)
     assert [x["result"] for x in r3.reviews] == ["reviewer ok"] and r3.status == "VERIFIED"
     r4 = de.run_dispatch(q, team=t, chat_fn=Fake({"Splitter": ["1. " + q], **GATES(), "Code Bot": [bad]}), review=False)
@@ -200,13 +200,13 @@ def _():
 @check("D9 bad team notes are refused with a clear message")
 def _():
     vault = vault_copy()
-    p = vault / "Bots/Math Gate.md"
+    p = vault / "Bots/Gate Bot Math.md"
     p.write_text(p.read_text().replace('for: "[[Math Bot]]"', 'for: "[[Nobody]]"'))
     try:
         de.load_team(vault, {}, {}, {}).validate()
         raise AssertionError("not refused")
     except sw.WaveError as e:
-        assert "Math Gate" in str(e) and "Nobody" in str(e), e
+        assert "Gate Bot Math" in str(e) and "Nobody" in str(e), e
 
 
 @check("D10 any model failure ends as FAILED with a receipt, never a crash")
@@ -231,7 +231,7 @@ import subprocess  # noqa: E402
 import wave_dispatch_app as app  # noqa: E402
 import wave_dispatch_setup as setup  # noqa: E402
 
-INSTALLED = ["wave-split:latest", "wave-gate:latest", "wave-code-gate:latest", "wave-review:latest", "llama3.1:8b",
+INSTALLED = ["wave-split:latest", "wave-gate:latest", "wave-gate2:latest", "wave-review:latest", "llama3.1:8b",
              "qwen2.5-coder:7b"]
 
 
@@ -297,36 +297,53 @@ def _():
     assert not any(e.get("bot") in ("Splitter", "Code Checker") for e in ev if e["event"] == "step")
 
 
-@check("D13 setup: tiny models are installed only from models/<name>/ with the size + sha256 from models.json")
+@check("D13 setup: tiny models only from models/<name>/<name>-q8_0.gguf, checked by size + sha256, installed from a hashed copy")
 def _():
     assert setup.tiny_name("wave-gate:latest") == "wave-gate" and setup.tiny_name("wave-split") == "wave-split"
     assert setup.tiny_name("wave-gate:old") == "" and setup.tiny_name("llama3.1:8b") == ""
     d = Path(tempfile.mkdtemp(prefix="wd_models_"))
     (d / "wave-gate").mkdir()
     blob = b"GGUF" + b"\0" * 60
-    (d / "wave-gate" / "Modelfile").write_text("FROM ./g.gguf\n")
-    (d / "wave-gate" / "g.gguf").write_bytes(blob)
-    meta = {"wave-gate": {"file": "g.gguf", "bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}}
+    g = d / "wave-gate" / "wave-gate-q8_0.gguf"
+    g.write_bytes(blob)
+    meta = {"wave-gate": {"file": g.name, "bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}}
     (d / "models.json").write_text(json.dumps(meta))
-    assert setup.tiny_files("wave-gate", d) == (d / "wave-gate", "")
+    assert setup.tiny_files("wave-gate", d) == (g, "")
     assert "no entry" in setup.tiny_files("wave-split", d)[1]
-    (d / "wave-gate" / "g.gguf").write_bytes(blob[:-1] + b"x")                  # same size, other bytes
+    for bad in ("../../requirements.txt", "other.gguf"):              # Astra security review: models.json can't
+        (d / "models.json").write_text(json.dumps({"wave-gate": {**meta["wave-gate"], "file": bad}}))   # redirect
+        assert "must name the file" in setup.tiny_files("wave-gate", d)[1], bad
+    (d / "models.json").write_text(json.dumps(meta))
+    g.write_bytes(blob[:-1] + b"x")                                     # same size, other bytes
     assert "sha256 does not match" in setup.tiny_files("wave-gate", d)[1]
-    (d / "wave-gate" / "g.gguf").write_bytes(blob + b"x")
+    g.write_bytes(blob + b"x")
     assert "wrong size" in setup.tiny_files("wave-gate", d)[1]
-    (d / "wave-gate" / "g.gguf").unlink()
-    (d / "wave-gate" / "g.gguf").symlink_to(d / "models.json")
-    assert "missing" in setup.tiny_files("wave-gate", d)[1]                     # a symlink is never followed
+    g.unlink()
+    g.symlink_to(d / "models.json")
+    assert "missing" in setup.tiny_files("wave-gate", d)[1]             # a symlink is never followed
+    g.unlink(); g.write_bytes(blob)
+    seen = {}
+    def fake_run(cmd, cwd=None, **k):
+        seen.update(cmd=cmd, modelfile=(Path(cwd) / "Modelfile").read_text(), copy=(Path(cwd) / g.name).read_bytes(),
+                    cwd=cwd)
+        return subprocess.CompletedProcess(cmd, 0, "", "success")
+    with patched(subprocess, "run", fake_run):
+        ok, why = setup.install_tiny("wave-gate", "http://127.0.0.1:1", d)
+    assert ok and seen["cmd"] == ["ollama", "create", "wave-gate", "-f", "Modelfile"] and seen["copy"] == blob
+    assert seen["modelfile"] == setup.modelfile("wave-gate") and seen["modelfile"].startswith("FROM ./wave-gate-q8_0.gguf")
+    assert not Path(seen["cwd"]).exists()                                # the private copy is gone afterwards
     def no_run(*a, **k):
         raise AssertionError("ollama must not run for a bad file")
+    g.write_bytes(blob[:-1] + b"y")
     with patched(subprocess, "run", no_run):
-        ok, why = setup.install_tiny("wave-gate", "http://127.0.0.1:1", d)
-    assert not ok and "missing" in why
+        assert not setup.install_tiny("wave-gate", "http://127.0.0.1:1", d)[0]
     real = json.loads((ROOT / "models/models.json").read_text())                # the shipped checksums
-    assert set(real) == {"wave-gate", "wave-code-gate", "wave-split", "wave-review"} and all(len(v["sha256"]) == 64 for v in real.values())
+    assert set(real) == {"wave-gate", "wave-gate2", "wave-split", "wave-review"} and all(len(v["sha256"]) == 64 for v in real.values())
     for name in real:
-        assert (ROOT / "models" / name / "Modelfile").read_text().startswith(f"FROM ./{real[name]['file']}")
-    assert "repeat_penalty 1.0" in (ROOT / "models/wave-split/Modelfile").read_text()   # 91.6% without it
+        assert real[name]["file"] == f"{name}-q8_0.gguf"
+        assert sorted((ROOT / "models" / name / "Modelfile").read_text().strip().splitlines()) == \
+            sorted(setup.modelfile(name).strip().splitlines()), name          # shipped file = what setup writes
+    assert "repeat_penalty 1.0" in setup.modelfile("wave-split")         # 91.6% without it
 
 
 @check("D14 setup --check: READY with every model, FAIL for a missing tiny model, writes nothing")
@@ -447,7 +464,7 @@ def _():
     assert len(pq) == 2 and "[[Compiler]]" in next(q for q in pq if "llama" in q), pq
 
 
-@check("D19 a part only the Notes Gate takes also goes to the Writer: the Graph Reader's facts are never the answer")
+@check("D19 a part only the Gate Bot Graph takes also goes to the Writer: the Graph Reader's facts are never the answer")
 def _():
     t = team_for(vault_copy())
     q = "What does the [[Example Setup]] note say about the graphics card?"
@@ -459,6 +476,149 @@ def _():
     w = next(m for n, m in f.calls if n == "Writer")
     assert "24 GB card" in w[-1]["content"]                       # the Writer got the facts
     assert r.checks["all_bots_answered"] and r.status == "VERIFIED", (r.status, r.checks)
+
+
+@check("D20 a code bot's '(no code needed)' is no answer: no review loop, the Writer answers instead (live 2026-11-06)")
+def _():
+    t = team_for(vault_copy())
+    q = "write me a poem"
+    f = Fake({"Splitter": ["1. " + q], **GATES(code=lambda p: True), "Code Bot": ["```python\n# (no code needed)\n```"],
+              "Code Checker": ["yes"], "Writer": ["Roses are red, violets are blue."], "Compiler": ["x"]})
+    r = de.run_dispatch(q, team=t, chat_fn=f)
+    who = [n for n, _ in f.calls]
+    assert "Writer" in who and "Code Checker" not in who and "Try Again Coding Bot" not in who, who
+    assert r.answer == "Roses are red, violets are blue." and r.routes["1"] == ["Writer"], (r.answer, r.routes)
+    assert dc.no_code_answer("```html\n<!-- no code needed -->\n```") and not dc.no_code_answer("def f(): pass  # no code needed")
+
+
+@check("D21 security review 2026-11-06: vault Machine notes can't read other secrets or use unapproved servers")
+def _():
+    vault = vault_copy()
+    m = vault / "Machines/This Computer.md"
+    base = m.read_text()
+    m.write_text(base.replace('endpoint: "${WAVE_DISPATCH_ENDPOINT:-http://127.0.0.1:11434}"',
+                              'endpoint: "http://127.0.0.1:11434"\napi_key: "${HOME}"'))
+    try:
+        de.load_team(vault, {}, {}, {}); raise AssertionError("not refused")
+    except sw.WaveError as e:
+        assert "only use ${WAVE_DISPATCH_" in str(e) and "${HOME}" in str(e), e
+    m.write_text(base.replace('endpoint: "${WAVE_DISPATCH_ENDPOINT:-http://127.0.0.1:11434}"',
+                              'endpoint: "http://127.0.0.1:11434"\napi_key: "${123_SECRET}"'))   # review 2: digit first
+    try:
+        de.load_team(vault, {}, {}, {}); raise AssertionError("not refused")
+    except sw.WaveError as e:
+        assert "${123_SECRET}" in str(e), e
+    m.write_text(base.replace('"${WAVE_DISPATCH_ENDPOINT:-http://127.0.0.1:11434}"', '"https://attacker.example"'))
+    try:
+        de.load_team(vault, {}, {}, {}); raise AssertionError("not refused")
+    except sw.WaveError as e:
+        assert "not approved" in str(e), e
+    assert de.load_team(vault, {"WAVE_DISPATCH_NODE2_URL": "https://attacker.example"}, {}, {})   # approved in .env
+    assert de.load_team(vault, {}, {"This Computer": {"endpoint": "https://attacker.example"}}, {})  # or in the config
+    m.write_text(base)
+    assert de.load_team(vault, {}, {}, {}).machines["This Computer"].base_url == "http://127.0.0.1:11434"
+
+
+@check("D22 security review: hostile replies can't stall the sum check, forge a checked number, or plant links in notes")
+def _():
+    import time
+    from wave_dispatch import calc as _calc
+    t0 = time.time()
+    _calc.check_sums(("1" + " " * 300 + "+" + " " * 300 + "1" + " " * 300 + "!\n") * 20)
+    assert time.time() - t0 < 0.5, time.time() - t0
+    vault = vault_copy()
+    t = team_for(vault)
+    q = "What is 2 + 2, and explain what addition is?"
+    split = "1. What is 2 + 2?\n2. ![x](https://attacker.example/p.png) Explain what addition is?"
+    f = Fake({"Splitter": [split], **GATES(math=lambda p: "2 + 2" in p, writer=lambda p: "addition" in p),
+              "Math Bot": ["2 + 2 = 4"], "Writer": ["Adding puts numbers together."],
+              "Compiler": ["2 + 2 = 999. Adding puts numbers together."]})
+    writer = sw.VaultWriter(vault, Path(tempfile.mkdtemp(prefix="wd_state_")), portable=True)
+    r = de.run_dispatch(q, team=t, chat_fn=f, writer=writer)
+    assert r.checks["sums_correct"] is False and r.status != "VERIFIED", (r.status, r.checks)   # the Compiler's 999
+    f2 = Fake({"Splitter": [split], **GATES(math=lambda p: "2 + 2" in p, writer=lambda p: "addition" in p),
+               "Math Bot": ["2 + 2 = 4"], "Writer": ["Adding puts numbers together."],
+               "Compiler": ["The result is 999. Adding puts numbers together."]})   # review 2: no equation at all
+    r2 = de.run_dispatch(q, team=team_for(vault_copy()), chat_fn=f2)
+    assert r2.checks.get("numbers_from_bots") is False and r2.status != "VERIFIED", (r2.status, r2.checks)
+    f3 = Fake({"Splitter": [split], **GATES(math=lambda p: "2 + 2" in p, writer=lambda p: "addition" in p),
+               "Math Bot": ["2 + 2 = 4"], "Writer": ["Adding puts numbers together."],
+               "Compiler": ["2 + 2 is 4. Adding puts numbers together (part 1 of 2)."]})
+    r3 = de.run_dispatch(q, team=team_for(vault_copy()), chat_fn=f3)
+    assert r3.checks.get("numbers_from_bots") is True, r3.checks                           # no false alarm
+    note = (vault / r.run_note).read_text()
+    assert len(r.parts) == 2, (r.parts, r.split_refused)
+    before_fence = note.split("## Parts and bots", 1)[1].split("```text", 1)[0]
+    assert "attacker.example" not in before_fence, before_fence                           # only inside the fence
+
+
+@check("D23 security review: receipts hash the final answer, and verifying compares it with the run note; no fake receipts")
+def _():
+    vault = vault_copy()
+    t = team_for(vault)
+    writer = sw.VaultWriter(vault, Path(tempfile.mkdtemp(prefix="wd_state_")), portable=True)
+    f = Fake({"Splitter": [SPLIT], **GATES(), "Code Checker": ["no"], "Code Bot": [CODE],
+              "Math Bot": ["There are 25 primes below 100."], "Compiler": ["[CODE 1]\n\n25 primes."]})
+    r = de.run_dispatch(MSG, team=t, chat_fn=f, writer=writer)
+    v = sw.verify_receipt(vault / r.receipt_note, vault)
+    assert v["hash_ok"] and v["notes_ok"] and v["answer_ok"], v
+    run = vault / r.run_note
+    run.write_text(run.read_text().replace("25 primes.", "99 primes."))                    # someone edits the answer
+    v = sw.verify_receipt(vault / r.receipt_note, vault)
+    assert v["hash_ok"] and not v["answer_ok"] and "final answer in the run note" in v["changed"], v
+    run.write_text(run.read_text().replace("99 primes.", "25 primes."))                    # back to the original
+    assert sw.verify_receipt(vault / r.receipt_note, vault)["answer_ok"]
+    orig = run.read_text()
+    shown = orig.replace("25 primes.", "99 primes.") + "\n## Final answer\n" + sw._fence(r.answer) + "\n"
+    run.write_text(shown)                                       # review 2: the real answer appended as a 2nd section
+    assert not sw.verify_receipt(vault / r.receipt_note, vault)["answer_ok"]
+    run.write_text(orig)
+    assert "older than 7" in sw.verify_receipt(vault / r.receipt_note, vault, min_version=7)["error"]   # no downgrade
+    canon = json.loads(re.search(r"```+json\n(.*?)\n```+", (vault / r.receipt_note).read_text(), re.S).group(1))
+    fake = {**canon, "team": [], "steps": []}
+    assert "needs its team" in sw.validate_manifest(fake)
+    fake = {**canon, "checks": {"final_answer_present": True}}
+    assert "every check" in sw.validate_manifest(fake)
+
+
+@check("D24 security review 3: sneaky numbers, sum forms, answer-section tricks and short keys")
+def _():
+    from wave_dispatch import calc as _calc
+    w = lambda t: [(x["claimed"], x["actual"]) for x in _calc.check_sums(t)[0]]
+    assert w("2 + 2 = +7") == [("7", "4")] and w("3x(4+1)=999") == [("999", "15")]
+    assert w("4 + 6 = 2 * 5 = 10") == [] and w("2000 + 2000 = 4,000") == [] and w("max 3 + 4 = 7") == []
+    for bad in ("The result is 999e0", "The result is 9.99e2", "The result is 7", "The result is 1,000"):
+        assert de._new_numbers(bad, ["2 + 2 = 4"], parts=2), bad
+    assert de._new_numbers("2 + 2 is 4 (part 1 of 2)", ["2 + 2 = 4"], parts=2) == []
+    for bad in (".999", "-4", "1"):                                    # security review 4
+        assert de._new_numbers(f"The result is {bad}", ["2 + 2 = 4"], parts=2), bad
+    for ok in ("1. The answer is 4.", "(1) 4 (2) four", "This is part 1 of 2: 4"):
+        assert de._new_numbers(ok, ["2 + 2 = 4"], parts=2) == [], ok
+    assert w("4 + 6 = 2 * 6 = 12") == [("2 * 6", "10")] and w("x = 3 + 4 = 7") == []
+    assert w("4 + 6 = (2 * 6) = 12") == [("(2 * 6)", "10")] and w("5 − 3 = 3") == [("3", "2")]      # review 5
+    assert de._new_numbers("The result is −4", ["2 + 2 = 4"], parts=2)
+    for bad in ("The result is − 4", "The result is (99)", "99. The result"):          # review 6
+        assert de._new_numbers(bad, ["2 + 2 = 4"], parts=2), bad
+    assert de._new_numbers("10 - 4 is 6", ["10 - 4 = 6"], parts=1) == []
+    assert w("2 + 2 = **99**") == [("99", "4")] and w("2 ** 3 = 9") == [("9", "8")] and w("2**3 = 8") == []   # review 7
+    assert de._new_numbers("The result is − **4**", ["2 + 2 = 4"]) and not de._new_numbers("It is **4**", ["2 + 2 = 4"])
+    import time
+    t0 = time.time(); _calc.check_sums(("1,2,3,4,5 " * 100 + "%\n") * 200); assert time.time() - t0 < 0.5
+    good = "# Run\n\n## Final answer\n" + sw._fence("4") + "\n\n## split\nx\n"
+    assert sw._final_answer_section(good) == sw._fence("4").strip()
+    tricks = [good.replace("## Final answer\n", "## Final answer ##\n") + "\n## Final answer\n" + sw._fence("9") + "\n",
+              "<!--\n" + good + "\n-->\n## Final answer\n" + sw._fence("9") + "\n",
+              good + "\n### final answer\n" + sw._fence("9") + "\n"]
+    for t in tricks:
+        assert sw._final_answer_section(t) is None, t[:80]
+    assert sw._final_answer_section("## Final answer\n```text\n## Final answer\n```\n") == "```text\n## Final answer\n```"
+    vault = vault_copy()
+    m = vault / "Machines/This Computer.md"
+    m.write_text(m.read_text().replace("tags: [wave-dispatch/machine]", 'api_key: "${WAVE_DISPATCH_KEY:-abc}"\ntags: [wave-dispatch/machine]'))
+    try:
+        de.load_team(vault, {}, {}, {}); raise AssertionError("short key accepted")
+    except sw.WaveError as e:
+        assert "shorter than 8" in str(e), e
 
 
 if __name__ == "__main__":

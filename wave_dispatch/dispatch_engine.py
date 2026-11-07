@@ -28,9 +28,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from . import calc, dispatch_core as dc
-from .wavecore import (ACTIVE, DEFAULT_VAULT, LINK, MODEL_ID, ROOT, Machine, Note, Reply, VaultWriter, WaveError, _fence,
+from .wavecore import (ACTIVE, DEFAULT_VAULT, ENV, LINK, MODEL_ID, ROOT, Machine, Note, Reply, VaultWriter, WaveError, _fence,
                       _frontmatter, _machine, _section, _status, chat, clean_model_id, ensure_model_note, expand,
                       graph_context, link_target, load_env, manifest_digest, manifest_json, model_note_name, read_note,
                       redact, safe_text, vault_files)
@@ -39,7 +40,7 @@ PROJECT = "Wave Dispatch"          # in the tiny models' trained prompts: keep i
 DUTIES = ("split", "gate", "graph", "worker", "review", "reviewer", "compiler")
 BOT_KEYS = ("duty", "model", "temperature", "seed", "machine", "status")
 OUTPUTS = ("code", "math", "text")
-MANIFEST_VERSION = 5
+MANIFEST_VERSION = 6
 STAGES = ("split", "gate", "graph", "work", "calc", "recheck", "review", "reviewer", "fix", "compile")
 PHASE = {"split": 0, "gate": 1, "graph": 2, "work": 3, "calc": 3, "recheck": 3, "review": 4, "reviewer": 4, "fix": 4,
          "compile": 5}            # steps are listed by phase, then bot, then in the order they happened
@@ -130,6 +131,43 @@ class Team:
                 raise WaveError(f"review gate '{r.name}': reviewer: [[{r.reviewer}]] must be an active reviewer bot")
 
 
+NOTE_VAR = ENV                    # the expander's own pattern: every variable it would expand is checked
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _note_value(value, env: dict[str, str], where: str):
+    """A Machine note comes from the vault, which may be someone else's: it may read only WAVE_DISPATCH_* variables
+    (Astra security review 2026-11-06: `api_key: ${ANY_SECRET}` + a hostile endpoint would have sent that secret out)."""
+    if isinstance(value, str):
+        bad = [m.group(1) for m in NOTE_VAR.finditer(value) if not m.group(1).startswith("WAVE_DISPATCH_")]
+        if bad:
+            raise WaveError(f"{where}: a vault note may only use ${{WAVE_DISPATCH_...}} variables (found ${{{bad[0]}}})")
+    return expand(value, env)
+
+
+def _approved(m: Machine, env: dict[str, str], default: dict | None, override: dict | None, where: str) -> Machine:
+    """An enabled machine's endpoint must be this computer (loopback) or one the user approved OUTSIDE the vault: a
+    WAVE_DISPATCH_* value in .env / the environment, or the config file / command line."""
+    if not m.enabled or (urlparse(m.base_url).hostname or "").lower() in LOOPBACK:
+        return m
+    import os
+    ok = {str(v).rstrip("/") for k, v in {**env, **os.environ}.items() if k.startswith("WAVE_DISPATCH_") and v}
+    ok |= {str(expand(d.get(k), env)).rstrip("/") for d in (default or {}, override or {}) for k in ("endpoint", "base_url")
+           if d.get(k)}
+    if m.base_url.rstrip("/") not in ok:
+        raise WaveError(f"{where}: endpoint {safe_text(m.base_url)} is not approved. Put it in .env (for example "
+                        "WAVE_DISPATCH_NODE2_URL=...) and write ${WAVE_DISPATCH_NODE2_URL} in the note.")
+    return m
+
+
+def _register_key(m: Machine, where: str) -> None:
+    """Every API key is redacted from model text, notes and receipts; the redactor skips strings under 8 characters
+    (they would match ordinary words), so such a key is refused rather than left visible (security review 3)."""
+    if len(m.api_key) < 8:
+        raise WaveError(f"{where}: api_key is shorter than 8 characters (a real key is longer)")
+    redact.register(m.api_key)
+
+
 def load_team(vault: Path = DEFAULT_VAULT, env: dict[str, str] | None = None,
               defaults: dict[str, dict] | None = None, overrides: dict[str, dict] | None = None) -> Team:
     """Bots + Machines from the vault (Machine note properties win over config defaults; CLI overrides win over both)."""
@@ -140,14 +178,19 @@ def load_team(vault: Path = DEFAULT_VAULT, env: dict[str, str] | None = None,
         n = read_note(p, vault)
         if n.props.get("type") != "machine":
             continue
-        merged = {**(defaults.get(n.name) or {}), **n.props, **(overrides.get(n.name) or {})}
-        machines[n.name] = _machine(n.name, {k: expand(v, env) for k, v in merged.items()}, n.rel)
+        trusted = {k: expand(v, env) for k, v in {**(defaults.get(n.name) or {}), **(overrides.get(n.name) or {})}.items()}
+        from_note = {k: _note_value(v, env, n.rel) for k, v in n.props.items() if k not in (overrides.get(n.name) or {})}
+        merged = {**{k: v for k, v in trusted.items() if k not in (overrides.get(n.name) or {})}, **from_note,
+                  **{k: v for k, v in trusted.items() if k in (overrides.get(n.name) or {})}}
+        machines[n.name] = _approved(_machine(n.name, merged, n.rel), env, defaults.get(n.name), overrides.get(n.name), n.rel)
         if machines[n.name].api_key:
-            redact.register(machines[n.name].api_key)
+            _register_key(machines[n.name], n.rel)
     for name in set(defaults) | set(overrides):
         if name not in machines and isinstance(defaults.get(name, overrides.get(name)), dict):
             merged = {**(defaults.get(name) or {}), **(overrides.get(name) or {})}
             machines[name] = _machine(name, {k: expand(v, env) for k, v in merged.items()}, f"config machines.{name}")
+            if machines[name].api_key:                  # every resolved key is redacted (security review 2)
+                _register_key(machines[name], f"config machines.{name}")
     bots = []
     for p in vault_files(vault, ".md", "Bots", recursive=False):
         n = read_note(p, vault)
@@ -192,6 +235,32 @@ class DispatchResult:
     mode: dict = field(default_factory=lambda: {"use_notes": True, "split": True, "review": True})
 
 
+NUM_ANY = re.compile(r"(?<![\w.])[-+]?(?:\d(?:[\d,]*\d)?(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?(?![\w.]\d)")
+MARKER = re.compile(r"(?mi)^[ \t]*\(?\d{1,2}[.)][ \t]|\(\d{1,2}\)|\bparts?[ \t]+\d{1,2}(?:[ \t]+of[ \t]+\d{1,2})?\b")
+
+
+def _new_numbers(answer: str, sources: list[str], parts: int = 1) -> list[str]:
+    """Numbers in the final answer that no source has: question, notes, parts, bot answers, calculator (security
+    reviews 2026-11-06: "the result is 999", "999e0", ".999", "-4", "− 4", "(99)"). Code blocks are the bots' own code
+    (put back by Python). A list marker ("1.", "(2)", "part 1 of 2") is free only when it is a real part number;
+    every other number must match a source exactly, sign included."""
+    def key(n: str) -> str:
+        try:
+            return calc.fmt(float(n.replace(",", "")))
+        except ValueError:
+            return n
+
+    def norm(text: str) -> str:                        # "is − 4" -> "is -4"; "10 - 4" stays a subtraction
+        return re.sub(r"(^|[^\d)\s])(\s*)-\s+(?=[\d.])", r"\1\2-", calc.plain_math(text or ""))
+
+    def free(m: re.Match) -> str:                      # a marker within the parts is free, any other stays a number
+        return " " if all(int(x) <= max(1, parts) for x in re.findall(r"\d+", m.group(0))) else m.group(0)
+    have = {key(n) for src in sources for n in NUM_ANY.findall(norm(src))}
+    have |= {key(n.lstrip("+-")) for src in sources for n in NUM_ANY.findall(norm(src))}   # "2 - 5" also has 5
+    text = MARKER.sub(free, calc.BLOCK.sub(" ", dc.ANY_FENCE.sub(" ", answer or "")))
+    return [n for n in NUM_ANY.findall(norm(text)) if key(n) not in have]
+
+
 def _yes(reply: str) -> bool:
     """A gate's reply: "no" -> False; yes or anything unclear -> True (better one bot too many than a lost part)."""
     m = re.search(r"\b(yes|no)\b", re.sub(r"<think>.*?</think>", "", reply or "", flags=re.S).lower())
@@ -216,6 +285,8 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
     reviews: list[dict] = []
     answers: dict[str, str] = {}                  # worker name -> its (latest) answer
     sums_wrong: dict[str, list] = {}
+    calc_rows: list[dict] = []                    # every exact calculator result (numbers the final answer may use)
+    compiled = False                              # True when the Compiler wrote the final answer
     refused, answer, error = "", "", ""
 
     def call(bot: Bot, stage: str, messages: list[dict], tokens: int = max_tokens) -> str:
@@ -262,6 +333,8 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
         exprs = calc.requests(out) if bot.output == "math" else []
         if exprs:                                 # the exact calculator, then ONE follow-up with the numbers
             rows = calc.run(exprs)
+            with lock:
+                calc_rows.extend(rows)
             msgs = msgs + [{"role": "assistant", "content": out}, {"role": "user", "content": (
                 "[controller] Calculator results (exact):\n" + calc.describe(rows) + calc.FOLLOWUP_OK)
                 if any(not r["error"] for r in rows) else calc.FOLLOWUP_NONE}]
@@ -275,6 +348,8 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
             out = call(bot, "recheck", msgs)
             if bot.output == "math" and calc.requests(out):
                 rows = calc.run(calc.requests(out))
+                with lock:
+                    calc_rows.extend(rows)
                 msgs = msgs + [{"role": "assistant", "content": out}, {"role": "user", "content": (
                     "[controller] Calculator results (exact):\n" + calc.describe(rows) + calc.FOLLOWUP_OK)}]
                 out = call(bot, "calc", msgs)
@@ -368,13 +443,21 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
         with ThreadPoolExecutor(max_workers=max(1, len(chosen))) as ex:   # 4. the specialists, at the same time
             for name, out in ex.map(lambda w: work(w, mine[w.name], facts), chosen):
                 answers[name] = out
+        skipped = [w for w in chosen if w.output == "code" and dc.no_code_answer(answers.get(w.name, ""))]
+        if skipped and not any(w not in skipped and answers.get(w.name, "").strip() for w in chosen) \
+                and text_bot not in chosen:                        # the code bot said "no code needed" and no one
+            chosen.append(text_bot)                                # else answered: the text bot answers instead
+            mine[text_bot.name] = [units[i] for i in range(len(units)) if any(w in skipped for w in per_part[i])] if parts else []
+            answers[text_bot.name] = work(text_bot, mine[text_bot.name], facts)[1]
+            routes = {k: [n for n in v if n not in {w.name for w in skipped}] + [text_bot.name]
+                      if any(n in {w.name for w in skipped} for n in v) else v for k, v in routes.items()}
         if review:                                                 # 5. the review loop per code bot
             for rg in team.duty("review"):
                 w = team.by_name(rg.target)
-                if w in chosen and answers.get(w.name, "").strip():
+                if w in chosen and w not in skipped and answers.get(w.name, "").strip():
                     review_loop(rg, w)
         given = [(w.name, answers[w.name]) for w in chosen if answers.get(w.name, "").strip()
-                 and answers[w.name].strip() != "(no code needed)"]
+                 and not (w.output == "code" and dc.no_code_answer(answers[w.name]))]
         if len(given) == 1 and not facts:                          # 6. nothing to combine
             answer = given[0][1]
         elif given or facts:
@@ -384,6 +467,7 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
                 code.append(m.group(0).strip())
                 return f"[CODE {len(code)}]"
             packet = "\n\n".join(f"[{n}]\n{dc.ANY_FENCE.sub(hold, a)}" for n, a in given)
+            compiled = True
             answer = call(comp, "compile", [system(comp), {"role": "user", "content": (
                 f"The user's question:\n<<<untrusted question>>>\n{prompt}\n<<<end question>>>\n\n"
                 + (f"Facts from the vault notes:\n<<<untrusted notes>>>\n{facts}\n<<<end notes>>>\n\n" if facts else "")
@@ -410,9 +494,14 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
     checks = {
         "all_bots_answered": not error and bool(answers) and all(n in ran for n in answers),
         "no_truncated_output": bool(steps) and not any(s["truncated"] for s in steps),
-        "sums_correct": not any(sums_wrong.values()),
+        # the FINAL answer too: the Compiler could turn a checked "2 + 2 = 4" into "2 + 2 = 999" (security review)
+        "sums_correct": not any(sums_wrong.values()) and not calc.check_sums(answer)[0],
         "python_parses": not any(calc.check_python(a) for a in code_ans),
     }
+    if compiled:                                  # every number the Compiler wrote must come from somewhere: the
+        checks["numbers_from_bots"] = not _new_numbers(answer, [prompt, facts, *parts, *answers.values()]
+                                                       + [r["result"] for r in calc_rows if not r["error"]],
+                                                       parts=len(parts))
     if ctx_read:
         checks["graph_context_found"] = bool(ctx)
     if review and any(r for r in reviews):
@@ -430,7 +519,7 @@ def run_dispatch(prompt: str, *, team: Team, writer: VaultWriter | None = None, 
              "team": team_cfg, "context": [{"note": n.rel, "file_sha256": hashlib.sha256(n.text.encode()).hexdigest(),
                                             "given": block} for n, block in ctx],
              "steps": [{k: v for k, v in s.items() if k not in ("seconds", "seq")} for s in steps], "checks": checks,
-             "status": status, "error": error, "mode": mode, "circuits": []}
+             "status": status, "error": error, "mode": mode, "circuits": [], "answer": answer}
     digest = manifest_digest(canon)
     run_id = f"{t0.strftime('%Y%m%d-%H%M%S')}-{digest[:8]}"
     res = DispatchResult(run_id, status, answer, checks, steps, parts, routes, reviews, refused, error=error,
@@ -464,10 +553,12 @@ def _write_notes(res: DispatchResult, writer: VaultWriter, team: Team, prompt: s
             f"{'on' if res.mode['split'] else 'off'} · Review loop: {'on' if res.mode['review'] else 'off'}", "",
             "## Parts and bots"]
     units = res.parts or [prompt]
-    body += [f"{i}. {p if len(units) > 1 else '(the whole question)'} → " + ", ".join(bot_l(b) for b in res.routes.get(str(i), []))
-             for i, p in enumerate(units, 1)]
+    if len(units) > 1:                    # model text (the Splitter's parts) only inside a fence: never live Markdown
+        body += [_fence("\n".join(f"{i}. {p}" for i, p in enumerate(units, 1)))]   # (security review: ![x](url) pixels)
+    body += [f"- {'Part ' + str(i) if len(units) > 1 else 'The whole question'} → "
+             + ", ".join(bot_l(b) for b in res.routes.get(str(i), [])) for i in range(1, len(units) + 1)]
     if res.split_refused:
-        body += [f"\nSplit refused by the controller ({res.split_refused}): the question went on whole."]
+        body += ["", "Split refused by the controller (the question went on whole):", _fence(res.split_refused)]
     if res.reviews:
         body += ["", "## Review loop"] + [f"- {r['bot']} round {r['round']}: review {'yes' if r['review'] else 'no'} → "
                                           f"{r.get('result', '')}" for r in res.reviews]

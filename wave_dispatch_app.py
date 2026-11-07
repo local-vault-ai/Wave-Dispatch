@@ -75,7 +75,7 @@ def load(args):
     installed, problems, machines = {}, [], []
     used = {b.machine for b in team.active()}
     for name, m in sorted(team.machines.items()):
-        if not m.enabled:
+        if not m.enabled or name not in used:     # never contact a machine no active bot uses (security review)
             continue
         row = {"name": name, "provider": m.provider, "endpoint": sw.safe_url(m.base_url), "reachable": False, "models": 0}
         try:

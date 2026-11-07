@@ -1,21 +1,24 @@
 ---
 type: bot
 duty: gate
-model: "wave-gate:latest"
+model: "wave-gate2:latest"
 temperature: 0
 seed: 7
 machine: "[[This Computer]]"
 status: active
-for: "[[Graph Reader]]"
-gate_question: "Does () contain a link to a note written in [[double brackets]]?"
+for: "[[Code Bot]]"
+gate_question: "Does () ask for code, a function, a script or a program?"
 gate_examples:
-  - "What does the [[Rules]] note say about saving? -> yes"
-  - "Summarise [[Project Plan]]. -> yes"
+  - "Write a JavaScript function that sorts a list. -> yes"
+  - "Fix this Python loop that never ends. -> yes"
   - "What is 15% of 80? -> no"
   - "Hi, how are you? -> no"
+  - "What does RAM mean? -> no"
+  - "What is 20% of 300, and what does percent mean? -> no"
+  - "How much memory is left if 8 GB of 16 GB is used? -> no"
 tags: [wave-dispatch/bot]
 ---
-# Notes Gate
+# Gate Bot Code
 
 Part of [[AI Bots]] · runs on [[This Computer]] · step in [[How Wave Dispatch Works]]
 

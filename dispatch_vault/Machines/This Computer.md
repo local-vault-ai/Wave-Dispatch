@@ -14,7 +14,7 @@ tags: [wave-dispatch/machine]
 The one computer Wave Dispatch uses out of the box. Every bot in [[AI Bots]] runs here.
 
 The team uses six models: two workers ([[qwen2.5-coder 7b]], [[llama3.1 8b]]) and four tiny ones of our own
-([[wave-gate]], [[wave-code-gate]], [[wave-split]], [[wave-review]], about 0.7 GB each). Keep them all loaded, or every question waits
+([[wave-gate]], [[wave-gate2]], [[wave-split]], [[wave-review]], about 0.7 GB each). Keep them all loaded, or every question waits
 for models to swap in (measured: 17-50 s instead of 1-6 s per question):
 
 - Ollama: set `OLLAMA_MAX_LOADED_MODELS=6`, `OLLAMA_CONTEXT_LENGTH=16384` and `OLLAMA_KEEP_ALIVE=-1`, then restart

@@ -1,23 +1,23 @@
 ---
 type: bot
 duty: gate
-model: "wave-gate:latest"
+model: "wave-gate2:latest"
 temperature: 0
 seed: 7
 machine: "[[This Computer]]"
 status: active
-for: "[[Math Bot]]"
-gate_question: "Does () ask for a calculation, a percentage or any number to work out?"
+for: "[[Writer]]"
+gate_question: "Does () ask to explain, define or describe something, to write a story, poem, joke, song, letter or other text, or is it a greeting or small talk?"
 gate_examples:
-  - "What is 15% of 80? -> yes"
-  - "A file is 3.2 GB and the disk has 10 GB free. How much space is left after saving it? -> yes"
-  - "How many seconds are in 3 hours? -> yes"
-  - "Hi, how are you? -> no"
-  - "What does RAM mean? -> no"
+  - "Hi there, how are you? -> yes"
+  - "Good morning! -> yes"
+  - "What does RAM mean? -> yes"
+  - "Explain what a GPU does. -> yes"
+  - "What is 3 * 7? -> no"
   - "Write a JavaScript function that sorts a list. -> no"
 tags: [wave-dispatch/bot]
 ---
-# Math Gate
+# Gate Bot Writer
 
 Part of [[AI Bots]] · runs on [[This Computer]] · step in [[How Wave Dispatch Works]]
 

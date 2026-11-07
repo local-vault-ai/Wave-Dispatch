@@ -33,7 +33,7 @@ judge the team against it (`Runs/Compare ...` notes; fill in `winner`).
 
 - **Use my notes**: the [[Graph Reader]] may read the notes your question `[[links]]`. Off: no vault reads.
 - **Split the question**: the [[Splitter]] runs first. Off: the whole question goes through the gates.
-- **Review loop**: the [[Code Checker]] and [[Try Again Bot]] check and fix code. Off: the result is ANSWERED
+- **Review loop**: the [[Code Checker]] and [[Try Again Coding Bot]] check and fix code. Off: the result is ANSWERED
   instead of VERIFIED.
 
 ## 4. Read the result

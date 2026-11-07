@@ -9,7 +9,7 @@
   python3 wave_dispatch_setup.py --verify-receipt dispatch_vault/Logs/"Receipt <id>.md"   recompute a receipt (read-only)
 
   --map-models   point a WORKER bot whose model is missing at the best installed model (rewrites the bot note).
-                 The four tiny models (wave-gate, wave-code-gate, wave-split, wave-review) are never remapped: their prompts were
+                 The four tiny models (wave-gate, wave-gate2, wave-split, wave-review) are never remapped: their prompts were
                  trained for them, so setup installs them from models/<name>/ (checked by sha256) instead.
   --endpoint URL / --provider ollama|openai   use another endpoint for This Computer (this invocation only)
 """
@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -39,7 +40,7 @@ if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
 HELLO = ("Hello Dispatch: what is 12 * 7, and in one sentence, what does the Splitter do according to "
          "[[How Wave Dispatch Works]]?")
 MODELS_DIR = ROOT / "models"
-TINY = ("wave-gate", "wave-code-gate", "wave-split", "wave-review")       # our own models: installed from models/<name>/, never pulled
+TINY = ("wave-gate", "wave-gate2", "wave-split", "wave-review")       # our own models: installed from models/<name>/, never pulled
 CONFIG_NAMES = ("dispatch_config.yaml", "dispatch_config.example.yaml")
 
 
@@ -83,38 +84,70 @@ def tiny_name(model: str) -> str:
     return base if base in TINY and model.split(":", 1)[-1] in (base, "latest") else ""
 
 
+TEMPLATE = ('TEMPLATE """{{- range .Messages }}<|im_start|>{{ .Role }}\n{{ .Content }}<|im_end|>\n{{ end }}'
+            '<|im_start|>assistant\n"""')
+PARAMS = {    # written by setup itself (never taken from a file): exactly the settings the models were measured with
+    "wave-gate": {"num_ctx": 2048, "num_predict": 2},
+    "wave-gate2": {"num_ctx": 2048, "num_predict": 2},
+    "wave-split": {"num_ctx": 4096, "num_predict": 400, "repeat_penalty": "1.0"},   # 1.1 (Ollama's default): 91.6%
+    "wave-review": {"num_ctx": 4096, "num_predict": 2},
+}
+
+
+def modelfile(name: str) -> str:
+    lines = [f"FROM ./{name}-q8_0.gguf", TEMPLATE, "PARAMETER temperature 0"]
+    lines += [f"PARAMETER {k} {v}" for k, v in PARAMS[name].items() if k != "repeat_penalty"]
+    lines += ['PARAMETER stop "<|im_end|>"', 'PARAMETER stop "<|endoftext|>"']
+    lines += [f"PARAMETER repeat_penalty {PARAMS[name]['repeat_penalty']}"] if "repeat_penalty" in PARAMS[name] else []
+    return "\n".join(lines) + "\n"
+
+
 def tiny_files(name: str, models_dir: Path = MODELS_DIR) -> tuple[Path | None, str]:
-    """(folder, "") when models/<name>/ has its Modelfile and the .gguf with the size + sha256 in models.json;
-    (None, why) otherwise. Hashing reads the file (~0.5 GB) once."""
+    """(path to the .gguf, "") when models/<name>/<name>-q8_0.gguf is a real file with the size + sha256 written in
+    models.json; (None, why) otherwise. The file name is FIXED (models.json can't point anywhere else) and no folder on
+    the way may be a symlink (Astra security review 2026-11-06). Hashing reads the file (~0.5 GB) once."""
+    want = f"{name}-q8_0.gguf"
     try:
         meta = json.loads((models_dir / "models.json").read_text(encoding="utf-8"))[name]
     except (OSError, ValueError, KeyError):
         return None, f"models/models.json has no entry for {name}"
-    folder = models_dir / name
-    gguf = folder / str(meta.get("file", ""))
-    if not (folder / "Modelfile").is_file():
-        return None, f"models/{name}/Modelfile is missing"
-    if gguf.is_symlink() or not gguf.is_file():
-        return None, (f"models/{name}/{gguf.name} is missing: download it from the release page (see README, "
-                      "'The three tiny models') and put it in that folder")
+    if name not in PARAMS or meta.get("file") != want:
+        return None, f"models/models.json: {name} must name the file {want}"
+    folder, gguf = models_dir / name, models_dir / name / want
+    if models_dir.is_symlink() or folder.is_symlink() or gguf.is_symlink() or not gguf.is_file():
+        return None, (f"models/{name}/{want} is missing: download it from the release page (see README, "
+                      "'The tiny models') and put it in that folder")
     if gguf.stat().st_size != meta.get("bytes"):
-        return None, f"models/{name}/{gguf.name} has the wrong size (an unfinished download?)"
+        return None, f"models/{name}/{want} has the wrong size (an unfinished download?)"
+    if _sha256_copy(gguf, None) != meta.get("sha256"):
+        return None, f"models/{name}/{want}: sha256 does not match models.json (a damaged or different file)"
+    return gguf, ""
+
+
+def _sha256_copy(src: Path, dst: Path | None) -> str:
+    """sha256 of src, written to dst at the same time (so what was checked is exactly what gets installed)."""
     h = hashlib.sha256()
-    with gguf.open("rb") as f:
+    with src.open("rb") as f, (dst.open("xb") if dst else open(os.devnull, "wb")) as out:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    if h.hexdigest() != meta.get("sha256"):
-        return None, f"models/{name}/{gguf.name}: sha256 does not match models.json (a damaged or different file)"
-    return folder, ""
+            out.write(chunk)
+    return h.hexdigest()
 
 
 def install_tiny(name: str, base_url: str, models_dir: Path = MODELS_DIR) -> tuple[bool, str]:
-    """`ollama create <name> -f Modelfile` in models/<name>/ against that machine's Ollama (an argument list, no shell)."""
-    folder, why = tiny_files(name, models_dir)
-    if not folder:
+    """Copy the .gguf into a private temporary folder while hashing it, write the Modelfile there, then
+    `ollama create <name>` from that folder against that machine's Ollama (an argument list, no shell)."""
+    gguf, why = tiny_files(name, models_dir)
+    if not gguf:
         return False, why
-    p = subprocess.run(["ollama", "create", name, "-f", "Modelfile"], cwd=folder, capture_output=True, text=True,
-                       env={**os.environ, "OLLAMA_HOST": base_url}, timeout=900)
+    meta = json.loads((models_dir / "models.json").read_text(encoding="utf-8"))[name]
+    with tempfile.TemporaryDirectory(prefix="wave-dispatch-model-") as td:
+        copy = Path(td) / gguf.name
+        if _sha256_copy(gguf, copy) != meta["sha256"]:
+            return False, f"models/{name}/{gguf.name} changed while it was being installed"
+        (Path(td) / "Modelfile").write_text(modelfile(name), encoding="utf-8")
+        p = subprocess.run(["ollama", "create", name, "-f", "Modelfile"], cwd=td, capture_output=True, text=True,
+                           env={**os.environ, "OLLAMA_HOST": base_url}, timeout=900)
     text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stderr or p.stdout or "")    # the CLI's terminal codes
     tail = text.strip().splitlines()[-1:] or [""]
     return p.returncode == 0, tail[0][:200]
@@ -186,10 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     cfg, cfg_name = load_config(args.config)
     vault = (args.vault or ROOT / str(cfg.get("vault", "dispatch_vault"))).resolve()
     if args.verify_receipt:
-        v = sw.verify_receipt(args.verify_receipt.resolve(), vault)
+        v = sw.verify_receipt(args.verify_receipt.resolve(), vault, min_version=de.MANIFEST_VERSION)
         print(f"hash {'OK' if v['hash_ok'] else 'MISMATCH'} · context notes {'unchanged' if v['notes_ok'] else 'CHANGED'}"
+              + f" · final answer {'matches the run note' if v.get('answer_ok', True) else 'DIFFERS from the run note'}"
               + (f" ({', '.join(v['changed'])})" if v["changed"] else "") + (f" · {v['error']}" if v["error"] else ""))
-        return 0 if v["hash_ok"] and v["notes_ok"] else 1
+        return 0 if v["hash_ok"] and v["notes_ok"] and v.get("answer_ok", True) else 1
     if args.check and (args.run or args.smoke or args.map_models or args.yes):
         print("--check is read-only: it can't be combined with --run / --smoke / --map-models / --yes")
         return 2
@@ -255,6 +289,9 @@ def main(argv: list[str] | None = None) -> int:
     for name, m in sorted(team.machines.items()):
         if not m.enabled:
             r.line(OK, f"[[{name}]] is disabled", "optional; see its note in Machines/")
+            continue
+        if name not in used:                      # never contact a machine no active bot uses (security review)
+            r.line(OK, f"[[{name}]] is enabled but no bot uses it", "not contacted")
             continue
         try:
             installed[name] = sw.list_models(m)

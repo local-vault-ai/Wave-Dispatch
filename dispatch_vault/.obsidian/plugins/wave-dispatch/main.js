@@ -277,7 +277,7 @@ class DispatchView extends ItemView {
     this.splitBox = toggle("split", "Split the question",
       "On: the Splitter (tiny model wave-split) splits a question with several asks into parts, so each part goes to the right bot. Python refuses a split that loses a number, link or function name.");
     this.reviewBox = toggle("review", "Review loop",
-      "On: the Code Checker (tiny model wave-review) decides whether the code needs a review; if so the Try Again Bot says what to fix and the Code Bot rewrites. Off: the result is ANSWERED, not VERIFIED.");
+      "On: the Code Checker (tiny model wave-review) decides whether the code needs a review; if so the Try Again Coding Bot says what to fix and the Code Bot rewrites. Off: the result is ANSWERED, not VERIFIED.");
     this.renderHint();
 
     const controls = el.createDiv({ cls: "wave-dispatch-controls" });

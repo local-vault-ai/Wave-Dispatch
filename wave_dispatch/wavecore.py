@@ -1296,7 +1296,9 @@ class WaveResult:
 MANIFEST_VERSION = 4          # 2 added "mode"; 3 adds second_opinion / circuit_tool, step "variant" and "circuits"
 MODE_KEYS = {2: {"use_notes", "strict_qa"}, 3: {"use_notes", "strict_qa", "second_opinion", "circuit_tool"},
              4: {"use_notes", "strict_qa", "second_opinion", "circuit_tool", "refine"},
-             5: {"use_notes", "split", "review"}}      # 5 = the Wave Dispatch engine (dispatch_engine.py)
+             5: {"use_notes", "split", "review"},      # 5 = the Wave Dispatch engine (dispatch_engine.py)
+             6: {"use_notes", "split", "review"}}      # 6 = 5 + the final answer (security review 2026-11-06)
+V6_CHECKS = {"all_bots_answered", "no_truncated_output", "sums_correct", "python_parses", "final_answer_present"}
 VARIANTS = ("main", "followup", "second_opinion", "second_opinion_followup")
 
 
@@ -1325,12 +1327,14 @@ def validate_manifest(canon: Any) -> str:
     if not isinstance(canon, dict):
         return "manifest is not an object"
     version = canon.get("manifest")
-    if version not in (1, 2, 3, 4, 5) or isinstance(version, bool):
+    if version not in (1, 2, 3, 4, 5, 6) or isinstance(version, bool):
         return "unsupported manifest version"
     if version >= 2:
         keys = keys | {"mode"}
     if version >= 3:
         keys = keys | {"circuits"}
+    if version >= 6:
+        keys = keys | {"answer"}
     if set(canon) != keys:
         return f"manifest keys differ: missing {sorted(keys - set(canon))}, extra {sorted(set(canon) - keys)}"
     mode = canon.get("mode", {"use_notes": True, "strict_qa": True})
@@ -1348,6 +1352,8 @@ def validate_manifest(canon: Any) -> str:
                 return "circuit entry has the wrong shape"
     if not isinstance(canon["prompt"], str) or not isinstance(canon["error"], str):
         return "prompt/error must be strings"
+    if version >= 6 and not isinstance(canon["answer"], str):
+        return "answer must be a string"
     if canon["status"] not in ("VERIFIED", "ANSWERED", "UNVERIFIED", "FAILED") or \
             (canon["status"] == "ANSWERED" and version == 1):
         return "bad status"
@@ -1377,6 +1383,9 @@ def validate_manifest(canon: Any) -> str:
         pp = PurePosixPath(c["note"])
         if pp.is_absolute() or ".." in pp.parts or not c["note"].endswith(".md"):
             return "context note path is not a vault-relative note"
+    if version >= 6 and canon["status"] != "FAILED" and (not canon["team"] or not canon["steps"]
+                                                        or not V6_CHECKS <= set(canon["checks"])):
+        return "a run that was not FAILED needs its team, its steps and every check"   # no hand-made VERIFIED receipts
     passed = bool(canon["checks"]) and all(canon["checks"].values()) and not canon["error"]
     strict = mode["review"] if version >= 5 else mode["strict_qa"]   # v5: the review loop plays QA's part
     if canon["status"] == "VERIFIED" and not (passed and strict):
@@ -1386,11 +1395,33 @@ def validate_manifest(canon: Any) -> str:
     return ""
 
 
-def verify_receipt(receipt: Path, vault: Path) -> dict:
+def _final_answer_section(note: str) -> str | None:
+    """The run note's ONE final-answer section, read like Markdown (security review 3): any heading level, trailing #s,
+    fenced blocks skipped while looking for headings; None if there are 0 or 2+ such sections or an HTML comment
+    outside a fence (it could hide one)."""
+    lines, fence, heads = note.splitlines(), False, []
+    for i, ln in enumerate(lines):
+        if re.match(r"\s{0,3}(```|~~~)", ln):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        if "<!--" in ln:
+            return None
+        if re.match(r"\s{0,3}#{1,6}\s", ln):
+            heads.append((i, bool(re.match(r"\s{0,3}#{1,6}\s+final\s+answer\s*#*\s*$", ln, re.I))))
+    finals = [i for i, f in heads if f]
+    if len(finals) != 1:
+        return None
+    nxt = next((i for i, _ in heads if i > finals[0]), len(lines))
+    return "\n".join(lines[finals[0] + 1:nxt]).strip()
+
+
+def verify_receipt(receipt: Path, vault: Path, min_version: int = 1) -> dict:
     """Recompute a receipt from disk. Never raises: {"hash_ok", "notes_ok", "changed": [...], "error"}. hash_ok needs a
     well-formed manifest (validate_manifest) whose sha256 equals the receipt's sha256 and whose status matches it;
     notes_ok needs every context note to still have its recorded full-file sha256."""
-    out = {"hash_ok": False, "notes_ok": False, "changed": [], "error": "", "circuits_ok": True}
+    out = {"hash_ok": False, "notes_ok": False, "changed": [], "error": "", "circuits_ok": True, "answer_ok": True}
     try:
         n = read_note(receipt, vault)
         m = MANIFEST_BLOCK.search(n.body)
@@ -1405,6 +1436,9 @@ def verify_receipt(receipt: Path, vault: Path) -> dict:
         problem = validate_manifest(canon)
         if problem:
             out["error"] = problem
+            return out
+        if canon["manifest"] < min_version:          # no downgrade to an older, weaker receipt format
+            out["error"] = f"receipt format {canon['manifest']} is older than {min_version}"
             return out
         sha = n.props.get("sha256")
         if not isinstance(sha, str) or not _HEX64.fullmatch(sha):
@@ -1422,6 +1456,15 @@ def verify_receipt(receipt: Path, vault: Path) -> dict:
             if body is None or hashlib.sha256(body.encode()).hexdigest() != c["file_sha256"]:
                 out["changed"].append(c["note"])
         out["notes_ok"] = not out["changed"]
+        if "answer" in canon:                        # v6: the run note must show exactly the answer that was hashed
+            m2 = re.match(r"\[\[([^\]|]+)", str(n.props.get("run") or ""))
+            try:
+                note = read_in_vault(vault, m2.group(1) + ".md") if m2 else None
+            except WaveError:
+                note = None
+            out["answer_ok"] = note is not None and _final_answer_section(note) == _fence(canon["answer"] or "(none)").strip()
+            if not out["answer_ok"]:
+                out["changed"].append("final answer in the run note")
         for c in canon.get("circuits", []):          # every circuit result is recomputed from its spec
             if c["error"]:
                 continue
